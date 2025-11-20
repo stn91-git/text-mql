@@ -1,7 +1,7 @@
 [project]
 name = "text-mql"
 version = "0.1.0"
-description = "Add your description here"
+description = "MongoDB Text-to-MQL API - Query MongoDB databases using natural language"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -11,4 +11,8 @@ dependencies = [
     "langchain-openai>=0.3.35",
     "pymongo>=4.15.4",
     "python-dotenv>=1.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.0.0",
+    "python-multipart>=0.0.6",
 ]

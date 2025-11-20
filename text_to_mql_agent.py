@@ -4,10 +4,14 @@ A simplified, reliable implementation using current LangChain versions
 """
 import os
 import json
+from dotenv import load_dotenv
 from pymongo import MongoClient
 from langchain_openai import ChatOpenAI
 from langchain.agents import Tool, AgentExecutor, create_react_agent
 from langchain.prompts import PromptTemplate
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ------------------------------------------------------------------------------
 # CONFIGURATION

@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@theme {
+  --font-serif: 'Merriweather', serif;
+}
+
+body {
+  background-color: #191A1A;
+}

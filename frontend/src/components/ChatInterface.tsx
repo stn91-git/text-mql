@@ -17,6 +17,7 @@ import {
 import type { Message, ChatSession } from '../hooks/useChat';
 import { clsx } from 'clsx';
 import { fetchCollections, fetchCollectionSchema } from '../lib/api';
+import { SmartRenderer } from './SmartRenderer';
 
 interface ChatInterfaceProps {
   session: ChatSession | null;
@@ -305,9 +306,7 @@ export function ChatInterface({
                                     <span className="text-gray-600">•</span>
                                     <span className="text-gray-500 font-normal text-xs">Answer</span>
                                 </div>
-                                <div className="prose prose-invert max-w-none text-gray-300 leading-7">
-                                    {message.content}
-                                </div>
+                                <SmartRenderer content={message.content} />
                             </div>
                         </div>
                     )}

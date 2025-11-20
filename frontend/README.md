@@ -1,43 +1,49 @@
-# Astro Starter Kit: Minimal
+# JusQuery Frontend
 
-```sh
-pnpm create astro@latest -- --template minimal
+Modern Astro + React dashboard that mirrors the JusQuery/Perplexity UI, connects to the Text-to-MQL backend, and stores chats in the browser.
+
+## Project Structure
+
 ```
-
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro project, you'll see the following folders and files:
-
-```text
-/
-├── public/
+frontend/
+├── public/           # static assets
 ├── src/
-│   └── pages/
-│       └── index.astro
+│   ├── components/   # React UI (Sidebar, Chat, etc.)
+│   ├── hooks/        # chat state & persistence
+│   ├── lib/          # API helpers
+│   └── pages/        # Astro routes
+├── .env.example      # frontend env template
 └── package.json
 ```
 
-Astro looks for `.astro` or `.md` files in the `src/pages/` directory. Each page is exposed as a route based on its file name.
+## Environment Variables
 
-There's nothing special about `src/components/`, but that's where we like to put any Astro/React/Vue/Svelte/Preact components.
+The frontend needs to know where the FastAPI backend is running. Astro exposes env vars prefixed with `PUBLIC_`.
 
-Any static assets, like images, can be placed in the `public/` directory.
+1. Copy the template and adjust the base URL if needed:
 
-## 🧞 Commands
+   ```bash
+   cd frontend
+   cp .env.example .env
+   # edit PUBLIC_API_BASE_URL if your backend is not at http://localhost:8000
+   ```
 
-All commands are run from the root of the project, from a terminal:
+2. Restart `pnpm dev` after changing `.env`.
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `pnpm install`             | Installs dependencies                            |
-| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
-| `pnpm build`           | Build your production site to `./dist/`          |
-| `pnpm preview`         | Preview your build locally, before deploying     |
-| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro -- --help` | Get help using the Astro CLI                     |
+## Scripts
 
-## 👀 Want to learn more?
+| Command           | Purpose                                     |
+| ----------------- | ------------------------------------------- |
+| `pnpm install`    | Install dependencies                        |
+| `pnpm dev`        | Start Astro dev server (default :4321)      |
+| `pnpm build`      | Production build to `dist/`                 |
+| `pnpm preview`    | Preview the production build                |
 
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+## Backend Integration Notes
+
+- The chat panel calls `POST /api/query` to get AI answers.
+- The status chip requests `/health` every 30 s and shows MongoDB/OpenAI connectivity.
+- The collections drawer uses `/api/collections` and `/api/schema/:collection`.
+- Update `PUBLIC_API_BASE_URL` whenever the backend URL changes.
+
+Run the FastAPI backend (see `/backend/README.md`) alongside the frontend for a full experience.

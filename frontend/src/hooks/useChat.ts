@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { queryDatabase } from '../lib/api';
 
 export type Message = {
   id: string;
@@ -20,6 +21,7 @@ export function useChat() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -73,6 +75,20 @@ export function useChat() {
 
   const currentSession = sessions.find((s) => s.id === currentSessionId) || null;
 
+  const appendMessage = useCallback((sessionId: string, message: Message) => {
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              messages: [...session.messages, message],
+              updatedAt: Date.now(),
+            }
+          : session,
+      ),
+    );
+  }, []);
+
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim()) return;
 
@@ -89,48 +105,49 @@ export function useChat() {
       timestamp: Date.now(),
     };
 
-    setSessions((prev) => {
-      return prev.map((session) => {
-        if (session.id === activeSessionId) {
-            // Update title if it's the first message
-            const title = session.messages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? '...' : '') : session.title;
-            return {
-                ...session,
-                title,
-                messages: [...session.messages, userMessage],
-                updatedAt: Date.now(),
-            };
-        }
-        return session;
-      });
-    });
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === activeSessionId
+          ? {
+              ...session,
+              title:
+                session.messages.length === 0
+                  ? content.slice(0, 30) + (content.length > 30 ? '...' : '')
+                  : session.title,
+              messages: [...session.messages, userMessage],
+              updatedAt: Date.now(),
+            }
+          : session,
+      ),
+    );
 
+    setError(null);
     setIsLoading(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMessage: Message = {
+    try {
+      const response = await queryDatabase(content);
+      const assistantMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: `This is a simulated response to: "${content}". \n\n I am running entirely in your browser!`,
+        content: response.result || 'No results returned.',
         timestamp: Date.now(),
       };
-
-      setSessions((prev) => {
-        return prev.map((session) => {
-          if (session.id === activeSessionId) {
-            return {
-              ...session,
-              messages: [...session.messages, aiMessage],
-              updatedAt: Date.now(),
-            };
-          }
-          return session;
-        });
-      });
+      appendMessage(activeSessionId, assistantMessage);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Something went wrong while querying.';
+      setError(message);
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `⚠️ ${message}`,
+        timestamp: Date.now(),
+      };
+      appendMessage(activeSessionId, assistantMessage);
+    } finally {
       setIsLoading(false);
-    }, 1000);
-  }, [currentSessionId, createNewSession]);
+    }
+  }, [appendMessage, currentSessionId, createNewSession]);
 
   return {
     sessions,
@@ -141,6 +158,8 @@ export function useChat() {
     deleteSession,
     sendMessage,
     isLoading,
+    error,
+    setError,
   };
 }
 

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { ChatInterface } from './ChatInterface';
 import { useChat } from '../hooks/useChat';
 import { Menu } from 'lucide-react';
+import { fetchHealth } from '../lib/api';
 
 export function App() {
   const {
@@ -14,9 +15,47 @@ export function App() {
     deleteSession,
     sendMessage,
     isLoading,
+    error,
+    setError,
   } = useChat();
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<{
+    state: 'loading' | 'healthy' | 'degraded' | 'offline';
+    detail: string;
+  }>({
+    state: 'loading',
+    detail: 'Checking backend status…',
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkHealth = async () => {
+      try {
+        const data = await fetchHealth();
+        if (!isMounted) return;
+        setConnectionStatus({
+          state: data.status === 'healthy' ? 'healthy' : 'degraded',
+          detail: `MongoDB: ${data.mongodb} • OpenAI: ${data.openai}`,
+        });
+      } catch (err) {
+        if (!isMounted) return;
+        const message = err instanceof Error ? err.message : 'Unable to reach backend.';
+        setConnectionStatus({
+          state: 'offline',
+          detail: message,
+        });
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 30_000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
     <div className="flex h-screen bg-[#191A1A] font-sans overflow-hidden">
@@ -55,6 +94,9 @@ export function App() {
           session={currentSession}
           isLoading={isLoading}
           onSendMessage={sendMessage}
+          error={error}
+          onDismissError={() => setError(null)}
+          connectionStatus={connectionStatus}
         />
       </div>
     </div>

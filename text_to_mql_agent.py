@@ -4,6 +4,9 @@ A simplified, reliable implementation using current LangChain versions
 """
 import os
 import json
+import ast
+import codecs
+import re
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from langchain_openai import ChatOpenAI
@@ -55,8 +58,8 @@ def get_collection_schema_tool(collection_name: str) -> str:
         client = get_mongo_client()
         db = client[DB_NAME]
         
-        # Sample a few documents to infer schema
-        sample = list(db[collection_name].find().limit(3))
+        # Sample only 1 document - we only need structure
+        sample = list(db[collection_name].find().limit(1))
         
         if not sample:
             client.close()
@@ -64,20 +67,27 @@ def get_collection_schema_tool(collection_name: str) -> str:
         
         # Get field names and types from first document
         schema_info = {}
-        for doc in sample:
-            for field, value in doc.items():
-                if field not in schema_info:
-                    schema_info[field] = type(value).__name__
+        for field, value in sample[0].items():
+            schema_info[field] = type(value).__name__
         
         client.close()
         
-        # Format schema nicely
-        schema_str = f"Schema for '{collection_name}':\n"
+        # Format schema concisely - only essential info
+        schema_str = f"Collection '{collection_name}' fields:\n"
         for field, field_type in schema_info.items():
-            schema_str += f"  - {field}: {field_type}\n"
+            schema_str += f"  {field} ({field_type})\n"
         
-        # Add sample document
-        schema_str += f"\nSample document:\n{json.dumps(sample[0], indent=2, default=str)}"
+        # Include only minimal sample - first 7 fields with truncated values
+        sample_doc = sample[0]
+        sample_fields = list(sample_doc.items())[:7]
+        minimal_sample = {}
+        for k, v in sample_fields:
+            val_str = str(v)
+            if len(val_str) > 30:
+                val_str = val_str[:30] + "..."
+            minimal_sample[k] = val_str
+        
+        schema_str += f"\nSample (first 7 fields): {json.dumps(minimal_sample, default=str)}"
         
         return schema_str
     except Exception as e:
@@ -90,19 +100,81 @@ def execute_mongodb_query_tool(query_json: str) -> str:
     Example: {"collection": "movies", "operation": "find", "query": {"year": 1999}, "limit": 5}
     """
     try:
-        # Handle case where LLM double-stringifies the JSON (wraps it in quotes)
-        # Strip outer quotes if present
+        # Try multiple parsing strategies to handle various input formats
         query_json = query_json.strip()
-        if query_json.startswith('"') and query_json.endswith('"'):
-            # Remove outer quotes and unescape inner quotes
-            query_json = query_json[1:-1].replace('\\"', '"').replace('\\n', '\n')
+        query_dict = None
+        last_error = None
         
-        # Parse the query
-        query_dict = json.loads(query_json)
+        # Strategy 1: Try parsing as-is (normal JSON)
+        try:
+            query_dict = json.loads(query_json)
+        except json.JSONDecodeError as e:
+            last_error = e
+            # Strategy 2: Strip quotes multiple times if needed
+            working_str = query_json
+            stripped_once = False
+            # Remove outer quotes repeatedly until we can't anymore
+            while working_str.startswith('"') and working_str.endswith('"') and len(working_str) > 2:
+                working_str = working_str[1:-1]
+                stripped_once = True
+                # Try parsing after each strip
+                try:
+                    query_dict = json.loads(working_str)
+                    break
+                except json.JSONDecodeError:
+                    continue
+            
+            # Strategy 3: If still not parsed, try unescaping with ast.literal_eval
+            if query_dict is None:
+                try:
+                    # Use ast.literal_eval to properly unescape Python string literals
+                    # Try on original string first
+                    unescaped = ast.literal_eval(query_json)
+                    query_dict = json.loads(unescaped)
+                except (ValueError, SyntaxError, json.JSONDecodeError) as e:
+                    last_error = e
+                    # Strategy 4: Manual unescaping as fallback
+                    # Use the working_str from Strategy 2 (already stripped) or original
+                    inner = working_str if stripped_once else query_json
+                    if inner.startswith('"') and inner.endswith('"'):
+                        inner = inner[1:-1]
+                    
+                    # Use codecs.decode to handle all escape sequences properly
+                    try:
+                        decoded = codecs.decode(inner, 'unicode_escape')
+                        query_dict = json.loads(decoded)
+                    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                        last_error = e
+                        # Strategy 5: Try direct replacement of escaped quotes
+                        inner_cleaned = inner.replace('\\"', '"').replace('\\\\', '\\')
+                        try:
+                            query_dict = json.loads(inner_cleaned)
+                        except json.JSONDecodeError as e:
+                            last_error = e
+                            # Strategy 6: Try to find JSON-like content (starts with { and ends with })
+                            json_match = re.search(r'\{.*\}', inner_cleaned, re.DOTALL)
+                            if json_match:
+                                try:
+                                    query_dict = json.loads(json_match.group())
+                                except json.JSONDecodeError:
+                                    pass
+        
+        if query_dict is None:
+            # Provide more helpful error message
+            error_msg = f"Invalid JSON input: Could not parse the input as JSON"
+            if last_error:
+                error_msg += f". Error: {str(last_error)}"
+            error_msg += f". Input received: {query_json[:200]}..." if len(query_json) > 200 else f". Input received: {query_json}"
+            return error_msg
+        
         collection_name = query_dict.get("collection")
         operation = query_dict.get("operation", "find")
         query = query_dict.get("query", {})
+        # Default limit to 10 to prevent large results, but allow override
         limit = query_dict.get("limit", 10)
+        # Cap limit at 50 to prevent context overflow (reduced from 100)
+        if limit > 50:
+            limit = 50
         sort = query_dict.get("sort")
         
         client = get_mongo_client()
@@ -111,6 +183,7 @@ def execute_mongodb_query_tool(query_json: str) -> str:
         
         # Execute based on operation type
         if operation == "find":
+            # find() returns all fields by default, so ISIN will be included
             cursor = collection.find(query)
             if sort:
                 cursor = cursor.sort(list(sort.items()))
@@ -123,6 +196,30 @@ def execute_mongodb_query_tool(query_json: str) -> str:
             
         elif operation == "aggregate":
             pipeline = query_dict.get("pipeline", [])
+            # Ensure aggregate pipeline has a limit stage to prevent large results
+            has_limit = any(stage.get("$limit") for stage in pipeline if isinstance(stage, dict))
+            if not has_limit and len(pipeline) > 0:
+                # Add a default limit if not present (reduced from 100)
+                pipeline.append({"$limit": 50})
+            
+            # Ensure ISIN is always included in aggregate results
+            # Check if there's a $project stage doing field inclusion (has 1 values)
+            for stage in pipeline:
+                if isinstance(stage, dict) and "$project" in stage:
+                    project_fields = stage["$project"]
+                    if isinstance(project_fields, dict):
+                        # Check if this is an inclusion projection (has 1 values)
+                        # If so, ensure ISIN is included
+                        has_inclusion = any(v == 1 for v in project_fields.values() if isinstance(v, (int, bool)))
+                        if has_inclusion:
+                            # This is an inclusion projection - add ISIN if not present
+                            if "isin" not in project_fields and "ISIN" not in project_fields:
+                                project_fields["isin"] = 1
+                                project_fields["ISIN"] = 1
+                        # If it's an exclusion projection (has 0 values) or no projection,
+                        # ISIN will be included by default, so no action needed
+                    break
+            
             results = list(collection.aggregate(pipeline))
         
         else:
@@ -135,7 +232,28 @@ def execute_mongodb_query_tool(query_json: str) -> str:
         if not results:
             return "Query returned no results"
         
-        return json.dumps(results, indent=2, default=str)
+        # Much stricter limits to prevent context overflow
+        MAX_RESULTS = 10  # Reduced from 50 - only show what's needed for context
+        MAX_RESULT_SIZE = 15000  # Increased to accommodate 10 results with full document fields
+        
+        # Truncate results if too many
+        total_count = len(results)
+        if total_count > MAX_RESULTS:
+            results = results[:MAX_RESULTS]
+            # Compact formatting - indent=1 instead of 2
+            result_str = json.dumps(results, indent=1, default=str)
+            result_str += f"\n[Showing {MAX_RESULTS} of {total_count} results]"
+        else:
+            # Compact formatting
+            result_str = json.dumps(results, indent=1, default=str)
+        
+        # Truncate if result string is too large
+        if len(result_str) > MAX_RESULT_SIZE:
+            truncated = result_str[:MAX_RESULT_SIZE]
+            truncated += f"\n[Truncated at {MAX_RESULT_SIZE} chars, {total_count} total results]"
+            return truncated
+        
+        return result_str
         
     except json.JSONDecodeError as e:
         return f"Invalid JSON input: {str(e)}"
@@ -177,11 +295,15 @@ def build_text_to_mql_agent():
             - operation: 'find', 'count', or 'aggregate'
             - query: MongoDB query document (for find/count)
             - pipeline: aggregation pipeline array (for aggregate)
-            - limit: max number of results (optional, default 10)
+            - limit: max number of results (optional, default 10, max 50). IMPORTANT: Always use a reasonable limit (10-50) to prevent large results.
             - sort: sort specification as object (optional)
             
-            Example for find: {"collection": "movies", "operation": "find", "query": {"year": 1999}, "limit": 5}
-            Example for aggregate: {"collection": "movies", "operation": "aggregate", "pipeline": [{"$match": {"year": 1999}}, {"$limit": 5}]}
+            Example for find: {"collection": "movies", "operation": "find", "query": {"year": 1999}, "limit": 10}
+            Example for aggregate: {"collection": "movies", "operation": "aggregate", "pipeline": [{"$match": {"year": 1999}}, {"$limit": 10}]}
+            
+            IMPORTANT: 
+            - Always specify a limit parameter (10-50 recommended) to avoid returning too many results.
+            - For financial data queries, always ensure ISIN (unique identifier) is included in results. If using $project in aggregate pipelines, include "isin": 1 or "ISIN": 1.
             """
         )
     ]
@@ -206,7 +328,9 @@ Observation: the result of the action
 Thought: I now know the final answer
 Final Answer: the final answer to the original input question
 
-IMPORTANT: Always start by listing collections to see what's available, then get the schema of relevant collections, then construct and execute the appropriate query.
+IMPORTANT: 
+- Always start by listing collections to see what's available, then get the schema of relevant collections, then construct and execute the appropriate query.
+- For financial fund queries, ALWAYS ensure ISIN (the unique identifier) is included in query results. This is critical for identifying funds uniquely.
 
 Begin!
 
@@ -294,7 +418,10 @@ def main():
             if not user_input:
                 continue
             
+            # Create a fresh agent executor for each query to prevent context accumulation
+            # This ensures each query starts with a clean slate and doesn't exceed token limits
             print()  # Blank line before agent output
+            agent_executor = build_text_to_mql_agent()
             response = agent_executor.invoke({"input": user_input})
             
             print("\n" + "=" * 70)

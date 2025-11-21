@@ -2,9 +2,8 @@
     "apps": [
       {
         "name": "text-to-mql-app",
-        "script": "uvicorn",
+        "script": "/home/ubuntu/text-mql/backend/venv/bin/uvicorn",
         "args": "main:app --host 0.0.0.0 --port 8000",
-        "interpreter": "/home/ubuntu/text-mql/backend/venv/bin/python",
         "watch": false
       }
     ]

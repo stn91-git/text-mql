@@ -10,6 +10,9 @@ export default defineConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    server: {
+      allowedHosts: ['textmql-dev-app.station91.in']
+    },
     preview: {
       allowedHosts: ['textmql-dev-app.station91.in']
     }

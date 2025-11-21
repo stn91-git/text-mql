@@ -1,7 +1,8 @@
 """Agent setup and configuration."""
 from langchain_openai import ChatOpenAI
-from langchain.agents import Tool, AgentExecutor, create_react_agent
-from langchain.prompts import PromptTemplate
+from langchain_classic.agents import AgentExecutor, create_react_agent
+from langchain_core.tools import StructuredTool
+from langchain_core.prompts import PromptTemplate
 from core.config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_TEMPERATURE
 from core.mongodb import list_collections_tool, get_collection_schema_tool, execute_mongodb_query_tool
 
@@ -19,19 +20,19 @@ def build_text_to_mql_agent():
     
     # Define tools
     tools = [
-        Tool(
-            name="list_collections",
+        StructuredTool.from_function(
             func=list_collections_tool,
+            name="list_collections",
             description="Lists all available collections in the MongoDB database. Use this first to see what data is available. Input can be anything."
         ),
-        Tool(
-            name="get_schema",
+        StructuredTool.from_function(
             func=get_collection_schema_tool,
+            name="get_schema",
             description="Gets the schema and sample data for a specific MongoDB collection. Input should be the collection name (e.g., 'movies', 'users', 'comments')."
         ),
-        Tool(
-            name="query_mongodb",
+        StructuredTool.from_function(
             func=execute_mongodb_query_tool,
+            name="query_mongodb",
             description="""Executes a MongoDB query. Input must be a valid JSON string with these keys:
             - collection: name of the collection
             - operation: 'find', 'count', or 'aggregate'

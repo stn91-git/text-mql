@@ -9,6 +9,9 @@ export default defineConfig({
   integrations: [react()],
 
   vite: {
-    plugins: [tailwindcss()]
+    plugins: [tailwindcss()],
+    preview: {
+      allowedHosts: ['textmql-dev-app.station91.in']
+    }
   }
 });
